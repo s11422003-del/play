@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<title>城市建設大亨</title>
+
+<style>
+*{
+    box-sizing:border-box;
+}
+
+body{
+    margin:0;
+    background:#1f2937;
+    color:white;
+    font-family:"Microsoft JhengHei",sans-serif;
+}
+
+h1,h2,h3{
+    margin:0;
+}
+
+#game{
+    padding:20px;
+}
+
+.topbar{
+    background:#111827;
+    padding:15px;
+    border-radius:12px;
+    margin-bottom:20px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+}
+
+button{
+    cursor:pointer;
+    border:none;
+    border-radius:10px;
+    padding:10px 16px;
+    font-size:15px;
+    font-weight:bold;
+    transition:0.2s;
+}
+
+button:hover{
+    transform:scale(1.05);
+}
+
+.roll-btn{
+    background:#f59e0b;
+    color:black;
+}
+
+.end-btn{
+    background:#10b981;
+    color:white;
+}
+
+.buy-btn{
+    background:#3b82f6;
+    color:white;
+    margin-top:10px;
+    width:100%;
+}
+
+.player-area{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+    gap:15px;
+    margin-bottom:20px;
+}
+
+.player-card{
+    background:#374151;
+    border-radius:15px;
+    padding:15px;
+    border:3px solid transparent;
+}
+
+.current-player{
+    border:3px solid #facc15;
+}
+
+.market{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+    gap:15px;
+}
+
+.card{
+    background:#f3f4f6;
+    color:black;
+    border-radius:15px;
+    padding:15px;
+    box-shadow:0 4px 10px rgba(0,0,0,0.3);
+}
+
+.card h3{
+    margin-bottom:10px;
+}
+
+.landmark{
+    background:#fde68a;
+}
+
+.log{
+    margin-top:20px;
+    background:#111827;
+    padding:15px;
+    border-radius:12px;
+    height:220px;
+    overflow-y:auto;
+    line-height:1.6;
+}
+
+.dice{
+    font-size:32px;
+    font-weight:bold;
+    color:#facc15;
+}
+
+.section-title{
+    margin:25px 0 10px;
+}
+
+.badge{
+    display:inline-block;
+    padding:4px 8px;
+    border-radius:8px;
+    margin:2px;
+    font-size:13px;
+}
+
+.done{
+    background:#10b981;
+}
+
+.notdone{
+    background:#ef4444;
+}
+
+.building-tag{
+    background:#dbeafe;
+    color:#1e3a8a;
+    padding:3px 8px;
+    border-radius:8px;
+    margin:2px;
+    display:inline-block;
+    font-size:13px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="game">
+
+    <div class="topbar">
+
+        <div>
+            <h1>🏛 城市建設大亨</h1>
+            <div id="turnInfo"></div>
+        </div>
+
+        <div>
+            <button class="roll-btn" onclick="rollDice()">
+                🎲 擲骰
+            </button>
+
+            <button class="end-btn" onclick="endTurn()">
+                ⏭ 結束回合
+            </button>
+        </div>
+
+    </div>
+
+    <h2 class="section-title">👥 玩家</h2>
+
+    <div class="player-area" id="players"></div>
+
+    <h2 class="section-title">🏪 市場</h2>
+
+    <div class="market" id="market"></div>
+
+    <h2 class="section-title">🏛 地標</h2>
+
+    <div class="market" id="landmarks"></div>
+
+    <h2 class="section-title">📜 紀錄</h2>
+
+    <div class="log" id="log"></div>
+
+</div>
+
+<script>
+
+const landmarkList = [
+    {name:"火車站",cost:4,desc:"可擲2顆骰"},
+    {name:"遊樂園",cost:10,desc:"雙骰相同再一回合"},
+    {name:"機場",cost:16,desc:"沒購買建築 +10元"},
+    {name:"市政府",cost:22,desc:"每回合可重骰"}
+];
+
+const allBuildings = [
+
+{
+name:"小麥田",
+cost:1,
+trigger:[1],
+description:"任何玩家骰出1時，你獲得1元",
+effect:(owner,current)=>{
+owner.money += count(owner,"小麥田");
+}
+},
+
+{
+name:"牧場",
+cost:1,
+trigger:[2],
+description:"任何玩家骰出2時，你獲得2元",
+effect:(owner,current)=>{
+owner.money += count(owner,"牧場")*2;
+}
+},
+
+{
+name:"麵包店",
+cost:1,
+trigger:[2,3],
+description:"自己骰出2或3時，獲得1元",
+effect:(owner,current)=>{
+if(owner===current){
+owner.money += count(owner,"麵包店");
+}
+}
+},
+
+{
+name:"咖啡廳",
+cost:2,
+trigger:[3],
+description:"別人骰出3時，向他拿1元",
+effect:(owner,current)=>{
+if(owner!==current){
+transferMoney(current,owner,1);
+}
+}
+},
+
+{
+name:"便利商店",
+cost:2,
+trigger:[4],
+description:"自己骰出4時，獲得3元",
+effect:(owner,current)=>{
+if(owner===current){
+owner.money += count(owner,"便利商店")*3;
+}
+}
+},
+
+{
+name:"花田",
+cost:1,
+trigger:[4],
+description:"任何玩家骰出4時，你獲得1元",
+effect:(owner,current)=>{
+owner.money += count(owner,"花田");
+}
+},
+
+{
+name:"林場",
+cost:3,
+trigger:[5],
+description:"任何玩家骰出5時，你獲得1元",
+effect:(owner,current)=>{
+owner.money += count(owner,"林場");
+}
+},
+
+{
+name:"花店",
+cost:1,
+trigger:[6],
+description:"自己骰出6時，每有1個花田得1元",
+effect:(owner,current)=>{
+if(owner===current){
+owner.money += count(owner,"花田");
+}
+}
+},
+
+{
+name:"速食店",
+cost:1,
+trigger:[6],
+description:"別人骰出6時，向他拿1元",
+effect:(owner,current)=>{
+if(owner!==current){
+transferMoney(current,owner,1);
+}
+}
+},
+
+{
+name:"葡萄園",
+cost:3,
+trigger:[7],
+description:"任何玩家骰出7時，你獲得3元",
+effect:(owner,current)=>{
+owner.money += count(owner,"葡萄園")*3;
+}
+},
+
+{
+name:"披薩店",
+cost:1,
+trigger:[7],
+description:"別人骰出7時，向他拿1元",
+effect:(owner,current)=>{
+if(owner!==current){
+transferMoney(current,owner,1);
+}
+}
+},
+
+{
+name:"家具工廠",
+cost:3,
+trigger:[8],
+description:"自己骰出8時，每個林場與礦場得3元",
+effect:(owner,current)=>{
+if(owner===current){
+let total=
+count(owner,"林場")+
+count(owner,"礦場");
+
+owner.money += total*3;
+}
+}
+},
+
+{
+name:"壽司店",
+cost:2,
+trigger:[8],
+description:"別人骰出8時，向他拿3元",
+effect:(owner,current)=>{
+if(owner!==current){
+transferMoney(current,owner,3);
+}
+}
+},
+
+{
+name:"礦場",
+cost:6,
+trigger:[9],
+description:"任何玩家骰出9時，你獲得5元",
+effect:(owner,current)=>{
+owner.money += count(owner,"礦場")*5;
+}
+},
+
+{
+name:"法國餐廳",
+cost:3,
+trigger:[9],
+description:"別人骰出9且有2棟以上地標時，向他拿5元",
+effect:(owner,current)=>{
+if(owner!==current && landmarkCount(current)>=2){
+transferMoney(current,owner,5);
+}
+}
+},
+
+{
+name:"蘋果園",
+cost:3,
+trigger:[10],
+description:"任何玩家骰出10時，你獲得3元",
+effect:(owner,current)=>{
+owner.money += count(owner,"蘋果園")*3;
+}
+},
+
+{
+name:"中式餐廳",
+cost:3,
+trigger:[10],
+description:"別人骰出10時，向他拿2元",
+effect:(owner,current)=>{
+if(owner!==current){
+transferMoney(current,owner,2);
+}
+}
+}
+
+];
+
+let state = {
+players:[],
+market:[],
+current:0,
+rolled:false,
+lastRoll:[]
+};
+
+function createPlayer(name){
+
+return{
+name,
+money:3,
+buildings:[
+allBuildings.find(b=>b.name==="小麥田"),
+allBuildings.find(b=>b.name==="麵包店")
+],
+landmarks:{
+"火車站":false,
+"遊樂園":false,
+"機場":false,
+"市政府":false
+}
+};
+
+}
+
+function count(player,name){
+
+return player.buildings.filter(
+b=>b.name===name
+).length;
+
+}
+
+function landmarkCount(player){
+
+return Object.values(
+player.landmarks
+).filter(v=>v).length;
+
+}
+
+function transferMoney(from,to,amount){
+
+let pay = Math.min(from.money,amount);
+
+from.money -= pay;
+
+to.money += pay;
+
+log(
+`${from.name} 支付 ${pay} 元給 ${to.name}`
+);
+
+}
+
+function log(text){
+
+const div=document.getElementById("log");
+
+div.innerHTML += text+"<br>";
+
+div.scrollTop = div.scrollHeight;
+
+}
+
+function initGame(){
+
+let n = parseInt(
+prompt("玩家人數(2~3)")
+);
+
+if(![2,3].includes(n)){
+n=2;
+}
+
+for(let i=1;i<=n;i++){
+
+state.players.push(
+createPlayer("玩家"+i)
+);
+
+}
+
+refillMarket();
+
+render();
+
+log("🎮 遊戲開始");
+
+}
+
+function refillMarket(){
+
+while(state.market.length<8){
+
+let random =
+allBuildings[
+Math.floor(
+Math.random()*allBuildings.length
+)
+];
+
+if(
+!state.market.some(
+b=>b.name===random.name
+)
+){
+state.market.push({...random});
+}
+
+}
+
+}
+
+function render(){
+
+renderPlayers();
+
+renderMarket();
+
+renderLandmarks();
+
+document.getElementById(
+"turnInfo"
+).innerHTML=
+`目前回合：<b>${currentPlayer().name}</b>`;
+
+}
+
+function renderPlayers(){
+
+const area=document.getElementById(
+"players"
+);
+
+area.innerHTML="";
+
+state.players.forEach((p,index)=>{
+
+const div=document.createElement("div");
+
+div.className="player-card";
+
+if(index===state.current){
+div.classList.add("current-player");
+}
+
+div.innerHTML=`
+
+<h2>${p.name}</h2>
+
+<p>💰 金錢：${p.money}</p>
+
+<p>
+${Object.entries(p.landmarks).map(
+([k,v])=>
+`<span class="badge ${
+v?"done":"notdone"
+}">
+${k}
+</span>`
+).join("")}
+</p>
+
+<div>
+${p.buildings.map(
+b=>`<span class="building-tag">
+${b.name}
+</span>`
+).join("")}
+</div>
+
+`;
+
+area.appendChild(div);
+
+});
+
+}
+
+function renderMarket(){
+
+const market=document.getElementById(
+"market"
+);
+
+market.innerHTML="";
+
+state.market.forEach((b,index)=>{
+
+const div=document.createElement("div");
+
+div.className="card";
+
+div.innerHTML=`
+
+<h3>${b.name}</h3>
+
+<p>💰 ${b.cost}</p>
+
+<p>🎲 ${b.trigger.join(",")}</p>
+
+<p>${b.description}</p>
+
+<button class="buy-btn"
+onclick="buyBuilding(${index})">
+購買
+</button>
+
+`;
+
+market.appendChild(div);
+
+});
+
+}
+
+function renderLandmarks(){
+
+const area=document.getElementById(
+"landmarks"
+);
+
+area.innerHTML="";
+
+let p=currentPlayer();
+
+landmarkList.forEach((l,index)=>{
+
+const owned=p.landmarks[l.name];
+
+const div=document.createElement("div");
+
+div.className="card landmark";
+
+div.innerHTML=`
+
+<h3>${l.name}</h3>
+
+<p>💰 ${l.cost}</p>
+
+<p>${l.desc}</p>
+
+<button
+class="buy-btn"
+${owned?"disabled":""}
+onclick="buyLandmark(${index})"
+>
+${owned?"已完成":"建造"}
+</button>
+
+`;
+
+area.appendChild(div);
+
+});
+
+}
+
+function currentPlayer(){
+
+return state.players[state.current];
+
+}
+
+function rollDice(){
+
+if(state.rolled){
+return;
+}
+
+let player=currentPlayer();
+
+let diceCount=1;
+
+if(player.landmarks["火車站"]){
+
+let choose=prompt(
+"擲幾顆骰子？(1或2)"
+);
+
+if(choose==="2"){
+diceCount=2;
+}
+
+}
+
+let rolls=[];
+
+for(let i=0;i<diceCount;i++){
+
+rolls.push(
+Math.floor(Math.random()*6)+1
+);
+
+}
+
+let total=rolls.reduce((a,b)=>a+b,0);
+
+state.lastRoll=rolls;
+
+state.rolled=true;
+
+log(
+`🎲 ${player.name} 骰出 ${rolls.join(",")} = ${total}`
+);
+
+if(
+player.landmarks["市政府"]
+){
+
+let reroll=confirm(
+"使用市政府重骰？"
+);
+
+if(reroll){
+
+rolls=[];
+
+for(let i=0;i<diceCount;i++){
+
+rolls.push(
+Math.floor(Math.random()*6)+1
+);
+
+}
+
+total=rolls.reduce((a,b)=>a+b,0);
+
+log(
+`🔁 重骰結果 ${rolls.join(",")} = ${total}`
+);
+
+}
+
+}
+
+triggerBuildings(total,player);
+
+render();
+
+if(
+diceCount===2 &&
+rolls[0]===rolls[1] &&
+player.landmarks["遊樂園"]
+){
+
+log("🎉 遊樂園發動！再一回合");
+
+player.extraTurn=true;
+
+}
+
+}
+
+function triggerBuildings(value,current){
+
+state.players.forEach(player=>{
+
+player.buildings.forEach(building=>{
+
+if(
+building.trigger.includes(value)
+){
+
+building.effect(player,current);
+
+}
+
+});
+
+});
+
+}
+
+function buyBuilding(index){
+
+let player=currentPlayer();
+
+let b=state.market[index];
+
+if(player.money<b.cost){
+
+alert("錢不夠");
+
+return;
+}
+
+player.money-=b.cost;
+
+player.buildings.push(b);
+
+log(
+`🛒 ${player.name} 購買 ${b.name}`
+);
+
+state.market.splice(index,1);
+
+refillMarket();
+
+render();
+
+}
+
+function buyLandmark(index){
+
+let player=currentPlayer();
+
+let l=landmarkList[index];
+
+if(player.landmarks[l.name]){
+
+alert("已擁有");
+
+return;
+
+}
+
+if(player.money<l.cost){
+
+alert("錢不夠");
+
+return;
+
+}
+
+player.money-=l.cost;
+
+player.landmarks[l.name]=true;
+
+log(
+`🏛 ${player.name} 完成 ${l.name}`
+);
+
+render();
+
+checkWin(player);
+
+}
+
+function checkWin(player){
+
+let win = Object.values(
+player.landmarks
+).every(v=>v);
+
+if(win){
+
+setTimeout(()=>{
+
+alert(
+"🏆 "+player.name+" 獲勝！"
+);
+
+},100);
+
+}
+
+}
+
+function endTurn(){
+
+if(!state.rolled){
+
+alert("請先擲骰");
+
+return;
+
+}
+
+let player=currentPlayer();
+
+if(
+player.landmarks["機場"]
+){
+
+log(
+`✈ ${player.name} 機場效果 +10元`
+);
+
+player.money += 10;
+
+}
+
+checkWin(player);
+
+if(player.extraTurn){
+
+player.extraTurn=false;
+
+state.rolled=false;
+
+render();
+
+return;
+
+}
+
+state.current++;
+
+state.current%=state.players.length;
+
+state.rolled=false;
+
+render();
+
+}
+
+initGame();
+
+</script>
+
+</body>
+</html>
+
+
